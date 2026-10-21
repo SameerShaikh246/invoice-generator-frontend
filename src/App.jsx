@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { FileText, Printer, Mail, Save } from "lucide-react";
+import { FileText, Printer, Mail, Save, Search, FolderOpen } from "lucide-react";
 import InvoiceEditor from "./components/InvoiceEditor";
 import InvoicePreview from "./components/InvoicePreview";
 import {
@@ -24,28 +24,13 @@ const initialInvoice = {
   dueDate: "2026-11-04",
   notes: "Payment is due within 14 days. Thank you for your business!",
   items: [
-    {
-      id: "item-1",
-      description: "Website design",
-      quantity: 1,
-      unitPrice: 1200,
-    },
-    {
-      id: "item-2",
-      description: "Frontend development",
-      quantity: 8,
-      unitPrice: 75,
-    },
+    { id: "item-1", description: "Website design", quantity: 1, unitPrice: 1200 },
+    { id: "item-2", description: "Frontend development", quantity: 8, unitPrice: 75 },
   ],
   discount: 0,
   taxRate: 10,
   customFields: [
-    {
-      id: "field-1",
-      label: "Payment terms",
-      value: "Net 14",
-      visible: true,
-    },
+    { id: "field-1", label: "Payment terms", value: "Net 14", visible: true },
   ],
 };
 
@@ -59,6 +44,7 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(true);
   const [historyError, setHistoryError] = useState("");
   const [isSendingEmail, setIsSendingEmail] = useState(false);
+  const [search, setSearch] = useState("");
 
   const refreshInvoiceHistory = async () => {
     setHistoryLoading(true);
@@ -77,7 +63,6 @@ export default function App() {
   useEffect(() => {
     refreshInvoiceHistory();
   }, []);
-
 
   const handleSaveInvoice = async () => {
     setIsSaving(true);
@@ -115,6 +100,7 @@ export default function App() {
       setInvoice(savedData);
       setSavedInvoiceId(id);
       setSaveStatus(`Loaded invoice ${savedData.invoiceNumber}.`);
+      window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (error) {
       setSaveStatus(`Could not load invoice: ${error.message}`);
     }
@@ -145,6 +131,7 @@ export default function App() {
       setIsLoading(false);
     }
   };
+
   const handleSendInvoiceEmail = async () => {
     if (!invoice.customerEmail?.trim()) {
       setSaveStatus("Enter the customer's email address first.");
@@ -170,12 +157,38 @@ export default function App() {
     }
   };
 
+  /* ---- display-only values ---- */
+  const currentTotal = calculateInvoice(invoice).total;
+
+  const historyRows = invoiceHistory.map((saved) => {
+    const data = saved.data || {};
+    return {
+      ...saved,
+      data,
+      total: calculateInvoice({
+        items: data.items || [],
+        discount: data.discount || 0,
+        taxRate: data.taxRate || 0,
+      }).total,
+    };
+  });
+
+  const totalBilled = historyRows.reduce((sum, row) => sum + row.total, 0);
+
+  const query = search.trim().toLowerCase();
+  const visibleRows = historyRows.filter(
+    (row) =>
+      !query ||
+      (row.invoiceNumber || "").toLowerCase().includes(query) ||
+      (row.data.customerName || "").toLowerCase().includes(query)
+  );
+
   return (
     <main className="app-shell">
       <header className="app-header no-print">
         <a className="brand" href="/" aria-label="Invoice Studio home">
           <span className="brand-icon">
-            <FileText size={21} />
+            <FileText size={19} />
           </span>
           <span>
             Invoice<span className="brand-light">Studio</span>
@@ -184,12 +197,9 @@ export default function App() {
 
         <div className="header-actions">
           <span className="draft-label">
-            <span className="draft-dot" /> Draft
+            <span className="draft-dot" /> {savedInvoiceId ? "Saved" : "Draft"}
           </span>
-          <button
-            className="button button-primary"
-            onClick={() => window.print()}
-          >
+          <button className="button button-primary" onClick={() => window.print()}>
             <Printer size={16} />
             Print / Save PDF
           </button>
@@ -198,9 +208,24 @@ export default function App() {
 
       <section className="workspace-heading no-print">
         <div>
-          <p className="eyebrow">WORKSPACE / INVOICES</p>
+          <p className="eyebrow">Invoices / New invoice</p>
           <h1>Create an invoice</h1>
           <p>Edit your details and preview your invoice in real time.</p>
+        </div>
+
+        <div className="stats">
+          <div className="stat">
+            <span>This invoice</span>
+            <strong>{formatUSD(currentTotal)}</strong>
+          </div>
+          <div className="stat">
+            <span>Saved invoices</span>
+            <strong>{historyRows.length}</strong>
+          </div>
+          <div className="stat">
+            <span>Total billed</span>
+            <strong>{formatUSD(totalBilled)}</strong>
+          </div>
         </div>
       </section>
 
@@ -224,7 +249,7 @@ export default function App() {
                 disabled={isSaving}
               >
                 <Save size={16} />
-                {isSaving ? "Saving..." : "Save Invoice"}
+                {isSaving ? "Saving..." : "Save"}
               </button>
 
               <button
@@ -233,7 +258,8 @@ export default function App() {
                 onClick={handleLoadInvoice}
                 disabled={isLoading || !savedInvoiceId}
               >
-                {isLoading ? "Loading..." : "Load Saved"}
+                <FolderOpen size={16} />
+                {isLoading ? "Loading..." : "Load saved"}
               </button>
 
               <button
@@ -252,17 +278,14 @@ export default function App() {
                 disabled={isSendingEmail}
               >
                 <Mail size={16} />
-                {isSendingEmail ? "Sending..." : "Send Invoice"}
+                {isSendingEmail ? "Sending..." : "Send invoice"}
               </button>
             </div>
           </div>
 
-
           <div className="no-print invoice-actions">
-
             {saveStatus && <p role="status">{saveStatus}</p>}
           </div>
-
 
           <InvoicePreview invoice={invoice} />
         </aside>
@@ -270,57 +293,91 @@ export default function App() {
 
       <section className="invoice-history no-print">
         <div className="section-heading">
-          <h2>Invoice History</h2>
-          <button
-            type="button"
-            onClick={refreshInvoiceHistory}
-            disabled={historyLoading}
-          >
-            {historyLoading ? "Refreshing..." : "Refresh"}
-          </button>
+          <div>
+            <h2>Invoice history</h2>
+            <p className="section-sub">Open any saved invoice to keep editing it.</p>
+          </div>
+
+          <div className="history-tools">
+            <label className="search-box">
+              <Search size={15} />
+              <input
+                type="search"
+                placeholder="Search invoice or customer"
+                aria-label="Search invoices"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={refreshInvoiceHistory}
+              disabled={historyLoading}
+            >
+              {historyLoading ? "Refreshing..." : "Refresh"}
+            </button>
+          </div>
         </div>
 
         {historyError && <p role="alert">{historyError}</p>}
 
         {historyLoading ? (
-          <p>Loading saved invoices...</p>
-        ) : invoiceHistory.length === 0 ? (
-          <p>No saved invoices yet.</p>
+          <p className="history-empty">Loading saved invoices...</p>
+        ) : historyRows.length === 0 ? (
+          <div className="history-empty">
+            <strong>No saved invoices yet</strong>
+            <p>Fill in the form above and select Save to see it here.</p>
+          </div>
+        ) : visibleRows.length === 0 ? (
+          <p className="history-empty">No invoices match "{search}".</p>
         ) : (
-          <div className="history-list">
-            {invoiceHistory.map((saved) => {
-              const totals = calculateInvoice({
-                items: saved.data.items || [],
-                discount: saved.data.discount || 0,
-                taxRate: saved.data.taxRate || 0,
-              });
-
-              return (
-                <article className="history-item" key={saved.id}>
-                  <div>
-                    <strong>{saved.invoiceNumber}</strong>
-                    <p>{saved.data.customerName || "No customer name"}</p>
-                    <small>
-                      Saved: {new Date(saved.createdAt).toLocaleDateString()}
-                    </small>
-                  </div>
-
-                  <div className="history-total">
-                    <strong>{formatUSD(totals.total)}</strong>
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSavedInvoice(saved.id)}
-                    >
-                      View / Load
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
+          <div className="table-wrap">
+            <table className="history-table">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Customer</th>
+                  <th>Saved on</th>
+                  <th className="num">Amount</th>
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRows.map((saved) => (
+                  <tr
+                    key={saved.id}
+                    className={saved.id === savedInvoiceId ? "is-active" : ""}
+                  >
+                    <td data-label="Invoice">
+                      <strong>{saved.invoiceNumber}</strong>
+                    </td>
+                    <td data-label="Customer">
+                      {saved.data.customerName || "No customer name"}
+                      {saved.data.customerEmail && (
+                        <small>{saved.data.customerEmail}</small>
+                      )}
+                    </td>
+                    <td data-label="Saved on">
+                      {new Date(saved.createdAt).toLocaleDateString()}
+                    </td>
+                    <td data-label="Amount" className="num">
+                      <strong>{formatUSD(saved.total)}</strong>
+                    </td>
+                    <td className="action">
+                      <button
+                        type="button"
+                        onClick={() => handleOpenSavedInvoice(saved.id)}
+                      >
+                        {saved.id === savedInvoiceId ? "Open" : "View / Load"}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
-
 
       <footer className="app-footer no-print">
         <span>Invoice Studio</span>
